@@ -220,7 +220,6 @@ async def process_file(file: UploadFile = File(...)):
 )
 async def process_file_ocr(
     file: UploadFile = File(...),
-    llm_model: str | None = Form(default=None),
     llm_prompt: str | None = Form(default=None),
 ):
     if is_forbidden_file(file.filename):
@@ -229,7 +228,9 @@ async def process_file_ocr(
     temp_file_path = None
 
     try:
-        selected_model = llm_model or os.getenv("OPENAI_MODEL", "gpt-4o")
+        selected_model = os.getenv("OPENAI_MODEL")
+        if not selected_model:
+            raise ValueError("OPENAI_MODEL is required for OCR endpoint")
 
         original_ext = os.path.splitext(file.filename or "")[1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as temp_file:
