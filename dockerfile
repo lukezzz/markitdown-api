@@ -1,8 +1,22 @@
 # Stage 1: Builder stage
-FROM python:3.13-slim AS builder
+FROM 172.16.83.81:8000/library/python:3.12.12-bookworm AS builder
 
+RUN echo "deb https://mirrors.aliyun.com/debian/ bookworm main contrib non-free non-free-firmware" >/etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian/ bookworm-updates main contrib non-free non-free-firmware" >>/etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian/ bookworm-backports main contrib non-free non-free-firmware" >>/etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian-security/ bookworm-security main contrib non-free non-free-firmware" >>/etc/apt/sources.list
+    
 # Install uv
+RUN apt-get update -y 
 RUN pip install uv
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    exiftool
+
+
+# Cleanup
+RUN rm -rf /var/lib/apt/lists/*
+
 
 # Set the working directory
 WORKDIR /app
@@ -16,7 +30,17 @@ ENV PATH="/app/venv/bin:$PATH"
 RUN uv pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: Final stage
-FROM python:3.13-slim
+FROM 172.16.83.81:8000/library/python:3.12.12-bookworm
+
+# Install runtime system dependencies
+RUN echo "deb https://mirrors.aliyun.com/debian/ bookworm main contrib non-free non-free-firmware" >/etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian/ bookworm-updates main contrib non-free non-free-firmware" >>/etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian/ bookworm-backports main contrib non-free non-free-firmware" >>/etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian-security/ bookworm-security main contrib non-free non-free-firmware" >>/etc/apt/sources.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        exiftool \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
