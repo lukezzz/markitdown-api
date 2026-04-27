@@ -146,6 +146,17 @@ async def process_file(file: UploadFile = File(...)):
         images = extract_images(temp_file_path, file.filename or "")
         logger.info(f"Extracted {len(images)} embedded image(s)")
 
+        # Append markdown image references for any image not already cited
+        unreferenced = [
+            img for img in images if img["filename"] not in markdown_content
+        ]
+        if unreferenced:
+            refs = "\n".join(
+                f"![{img['filename']}]({img['filename']})" for img in unreferenced
+            )
+            markdown_content = markdown_content.rstrip() + "\n\n" + refs
+            logger.info(f"Appended {len(unreferenced)} image reference(s) to markdown")
+
     except Exception as e:
         logger.error(f"An error occurred: {str(e)}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
