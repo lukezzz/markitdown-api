@@ -21,6 +21,13 @@ docker run -d --name markitdown-api -p 8490:8490 ghcr.io/dezoito/markitdown-api:
 
 ## Setup Instructions
 
+Before starting the service, configure OpenAI credentials because the OCR-enhanced API requires an LLM model:
+
+```bash
+export OPENAI_API_KEY="your_openai_api_key"
+export OPENAI_MODEL="gpt-4o"  # optional, defaults to gpt-4o
+```
+
 1. Clone the repository:
 
    ```bash
@@ -93,6 +100,28 @@ Accepts a POST request containing a file to convert to markdown.
 - **Returns**: JSON object with the converted markdown content
 
 For more information regarding valid file types, check the official [MarkItDown](https://github.com/microsoft/markitdown) project.
+
+### `/process_file_ocr`
+
+Accepts a POST request containing a file and converts it to markdown using the [markitdown-ocr](https://github.com/microsoft/markitdown/tree/main/packages/markitdown-ocr) plugin.
+
+- **Method**: POST
+- **Content-Type**: multipart/form-data
+- **Parameter**: file (binary)
+- **Optional form fields**:
+   - `llm_model` (default: `gpt-4o`)
+   - `llm_prompt` (custom OCR extraction prompt)
+- **Requires**: `OPENAI_API_KEY` environment variable at startup
+- **Returns**: JSON object with OCR-enhanced markdown content and model metadata
+
+Example:
+
+```sh
+curl -X POST \
+   -F "file=@path/to/scanned.pdf" \
+   -F "llm_model=gpt-4o" \
+   http://localhost:8490/process_file_ocr
+```
 
 ## Testing the application
 

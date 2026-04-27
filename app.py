@@ -2,15 +2,18 @@ import logging
 import os
 import tempfile
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 from markitdown import MarkItDown
+from openai import OpenAI
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 from utils.image_extractor import extract_images
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+load_dotenv()
 
 
 class ImageItem(BaseModel):
@@ -30,6 +33,12 @@ class ProcessFileResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error message")
+
+
+class OCRProcessFileResponse(BaseModel):
+    markdown: str = Field(..., description="Document content converted to Markdown")
+    model: str = Field(..., description="LLM model used for OCR")
+    ocr_enabled: bool = Field(..., description="Whether OCR plugin conversion was enabled")
 
 app = FastAPI(
     title="MarkItDown API Server",
@@ -114,9 +123,43 @@ def convert_to_md(filepath: str) -> str:
     return result.text_content
 
 
+def convert_to_md_with_ocr(
+    filepath: str,
+    llm_model: str,
+    llm_prompt: str | None = None,
+) -> str:
+    logger.info(f"Converting file with OCR plugin: {filepath}, model={llm_model}")
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        raise ValueError("OPENAI_API_KEY is required for OCR endpoint")
+
+    markitdown_kwargs = {
+        "enable_plugins": True,
+        "llm_client": OpenAI(api_key=openai_api_key),
+        "llm_model": llm_model,
+    }
+    if llm_prompt:
+        markitdown_kwargs["llm_prompt"] = llm_prompt
+
+    markitdown = MarkItDown(**markitdown_kwargs)
+    result = markitdown.convert(filepath)
+    logger.info(f"OCR conversion result: {result.text_content[:100]}")
+    return result.text_content
+
+
 @app.get("/")
 def read_root():
     return {"MarkItDown API Server": "hit /docs for endpoint reference"}
+
+
+@app.on_event("startup")
+def validate_openai_config() -> None:
+    """Fail fast at startup when OCR API prerequisites are missing."""
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY is required. Set it via environment variable or .env file before startup."
+        )
 
 
 @app.post(
@@ -168,6 +211,53 @@ async def process_file(file: UploadFile = File(...)):
             logger.info(f"Temporary file deleted: {temp_file_path}")
 
     return ProcessFileResponse(markdown=markdown_content, images=images)
+
+
+@app.post(
+    "/process_file_ocr",
+    response_model=OCRProcessFileResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+)
+async def process_file_ocr(
+    file: UploadFile = File(...),
+    llm_model: str | None = Form(default=None),
+    llm_prompt: str | None = Form(default=None),
+):
+    if is_forbidden_file(file.filename):
+        return JSONResponse(content={"error": "File type not allowed"}, status_code=400)
+
+    temp_file_path = None
+
+    try:
+        selected_model = llm_model or os.getenv("OPENAI_MODEL", "gpt-4o")
+
+        original_ext = os.path.splitext(file.filename or "")[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext) as temp_file:
+            temp_file.write(await file.read())
+            temp_file_path = temp_file.name
+            logger.info(f"Temporary OCR file path: {temp_file_path}")
+
+        markdown_content = convert_to_md_with_ocr(
+            temp_file_path,
+            llm_model=selected_model,
+            llm_prompt=llm_prompt,
+        )
+        logger.info("File converted to markdown with OCR successfully")
+
+    except Exception as e:
+        logger.error(f"An OCR error occurred: {str(e)}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+            logger.info(f"Temporary OCR file deleted: {temp_file_path}")
+
+    return OCRProcessFileResponse(
+        markdown=markdown_content,
+        model=selected_model,
+        ocr_enabled=True,
+    )
 
 
 if __name__ == "__main__":
