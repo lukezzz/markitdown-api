@@ -8,7 +8,7 @@ from markitdown import MarkItDown
 from openai import OpenAI
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-from utils.image_extractor import extract_images
+from utils.image_extractor import extract_images, replace_base64_images_in_markdown
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -118,7 +118,7 @@ def is_forbidden_file(filename):
 def convert_to_md(filepath: str) -> str:
     logger.info(f"Converting file: {filepath}")
     markitdown = MarkItDown()
-    result = markitdown.convert(filepath)
+    result = markitdown.convert(filepath, keep_data_uris=True)
     logger.info(f"Conversion result: {result.text_content[:100]}")
     return result.text_content
 
@@ -185,20 +185,17 @@ async def process_file(file: UploadFile = File(...)):
         markdown_content = convert_to_md(temp_file_path)
         logger.info("File converted to markdown successfully")
 
-        # Extract embedded images for supported source formats
-        images = extract_images(temp_file_path, file.filename or "")
-        logger.info(f"Extracted {len(images)} embedded image(s)")
+        # Extract ZIP-embedded images (docx/pptx/xlsx)
+        zip_images = extract_images(temp_file_path, file.filename or "")
+        logger.info(f"Extracted {len(zip_images)} ZIP-embedded image(s): {[img['filename'] for img in zip_images]}")
 
-        # Append markdown image references for any image not already cited
-        unreferenced = [
-            img for img in images if img["filename"] not in markdown_content
-        ]
-        if unreferenced:
-            refs = "\n".join(
-                f"![{img['filename']}]({img['filename']})" for img in unreferenced
-            )
-            markdown_content = markdown_content.rstrip() + "\n\n" + refs
-            logger.info(f"Appended {len(unreferenced)} image reference(s) to markdown")
+        # Replace inline base64 data URIs with filenames.
+        # ZIP image bytes are matched first so their original names (image1.png …) are used;
+        # any remaining unmatched inline images get synthetic names (inline_image_001.png …).
+        markdown_content, inline_images = replace_base64_images_in_markdown(markdown_content, zip_images)
+        logger.info(f"Replaced inline base64 image(s) in markdown: matched={len(zip_images) - len([i for i in zip_images if i['filename'] not in markdown_content])}, synthetic={len(inline_images)}")
+
+        images = zip_images + inline_images
 
     except Exception as e:
         logger.error(f"An error occurred: {str(e)}")
